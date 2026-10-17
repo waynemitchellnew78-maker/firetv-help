@@ -35,7 +35,19 @@
   .grid4 { display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px; }
   .grid4 button { padding:12px 0; font-size:14px; }
   .hint { color:var(--muted); font-size:13px; margin-top:8px; }
-  #controls[aria-disabled=true], #updateCard[aria-disabled=true] { opacity:.45; pointer-events:none; }
+  #controls[aria-disabled=true], #updateCard[aria-disabled=true], #appsCard[aria-disabled=true] { opacity:.45; pointer-events:none; }
+  .applist { margin-top:10px; max-height:460px; overflow:auto; }
+  .applist .app { padding:9px 0; border-top:1px solid var(--line); }
+  .applist .nm { font-weight:600; word-break:break-word; }
+  .applist .pk { color:var(--muted); font-size:12px; word-break:break-all; }
+  .badge { font-size:11px; padding:1px 6px; border-radius:6px; margin-left:6px; white-space:nowrap; }
+  .badge.sys { background:#3a2f12; color:#ffcf6b; } .badge.off { background:#3a1212; color:#ff9b9b; }
+  .badge.gone { background:#2a2a2a; color:#9aa; } .badge.prot { background:#1f2d3a; color:#8fc7ff; }
+  .acts { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+  .acts button { padding:6px 10px; font-size:13px; }
+  .acts .warn { background:#5a2a2a; } .acts .warn:hover { background:#6e3333; }
+  .appfilter { display:flex; gap:12px; margin-top:8px; font-size:13px; color:var(--muted); }
+  .appfilter label { display:flex; align-items:center; gap:4px; cursor:pointer; }
   #fps { position:absolute; right:8px; bottom:6px; font-size:12px; color:#ffffff99; display:none; }
 </style>
 </head>
@@ -95,21 +107,49 @@
       </div>
       <div class="hint" id="pushStatus">Pick an .apk to push to the connected TV. They’ll see it installing, then it updates in place.</div>
     </div>
+
+    <div class="card" id="appsCard" aria-disabled="true" style="margin-top:16px">
+      <h2>Manage apps</h2>
+      <div id="presets" style="margin-bottom:12px">
+        <div style="font-size:13px; margin-bottom:6px;">One-tap cleanup (disable — fully reversible):</div>
+        <div class="acts">
+          <button class="warn" id="pStopUpdates">Stop Amazon updates</button>
+          <button class="warn" id="pKillAds">Kill ads &amp; telemetry</button>
+          <button id="pRestoreAll">Restore preset apps</button>
+        </div>
+      </div>
+      <div class="row"><button class="primary" id="loadApps" style="flex:1">Load installed apps</button></div>
+      <div id="appsTools" style="display:none">
+        <div class="row" style="margin-top:8px"><input type="text" id="appSearch" placeholder="Search name or package…"></div>
+        <div class="appfilter">
+          <label><input type="radio" name="af" value="user" checked> User apps</label>
+          <label><input type="radio" name="af" value="system"> System</label>
+          <label><input type="radio" name="af" value="all"> All</label>
+        </div>
+      </div>
+      <div class="hint" id="appsStatus">Lists apps on the connected device. User apps uninstall cleanly; system apps can be removed for the user (reversible) — but that can break the device, so they’re confirmed and some are protected.</div>
+      <div id="appsList" class="applist"></div>
+    </div>
   </aside>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let ws, connected = false, lastUrl = null, frames = 0, currentCode = null;
+let ws, connected = false, lastUrl = null, frames = 0, currentCode = null, appsData = [];
 
 function setStatus(msg, cls) { $('status').textContent = msg || ''; $('status').className = cls || ''; }
 function setPush(msg, cls) { const el = $('pushStatus'); el.textContent = msg; el.style.color = cls === 'bad' ? 'var(--bad)' : cls === 'ok' ? 'var(--ok)' : ''; }
 function setActive(on) {
   connected = on;
   $('updateCard').setAttribute('aria-disabled', on ? 'false' : 'true');
+  $('appsCard').setAttribute('aria-disabled', on ? 'false' : 'true');
   $('controls').setAttribute('aria-disabled', on ? 'false' : 'true');
-  if (!on) { $('screen').style.display = 'none'; $('placeholder').style.display = 'block'; $('fps').style.display = 'none'; }
+  if (!on) {
+    $('screen').style.display = 'none'; $('placeholder').style.display = 'block'; $('fps').style.display = 'none';
+    appsData = []; $('appsList').innerHTML = ''; $('appsTools').style.display = 'none';
+  }
 }
+function setApps(msg, cls) { const el = $('appsStatus'); el.textContent = msg; el.style.color = cls === 'bad' ? 'var(--bad)' : cls === 'ok' ? 'var(--ok)' : ''; }
 
 function openSocket() {
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/viewer');
@@ -129,6 +169,18 @@ function openSocket() {
     else if (m.type === 'denied') { setActive(false); setStatus('They said no.', 'bad'); }
     else if (m.type === 'ended') { setActive(false); setStatus(m.reason || 'Session ended.', 'bad'); }
     else if (m.type === 'install-result') setPush(m.ok ? 'Installed on the TV ✓' : 'Install failed: ' + (m.message || ''), m.ok ? 'ok' : 'bad');
+    else if (m.type === 'apps') {
+      if (m.error) { setApps('Could not read apps: ' + m.error, 'bad'); }
+      else { appsData = m.list || []; $('appsTools').style.display = 'block'; setApps(appsData.length + ' apps found.'); renderApps(); }
+    }
+    else if (m.type === 'app-action-result') {
+      setApps((m.ok ? '✓ ' : '✗ ') + m.action + ' ' + m.pkg + ' — ' + (m.message || ''), m.ok ? 'ok' : 'bad');
+      if (m.ok) ws.send(JSON.stringify({ type: 'apps-list' })); // refresh
+    }
+    else if (m.type === 'app-batch-result') {
+      setApps('Preset “' + m.action + '” done — ' + (m.done || 0) + ' app(s) changed.', 'ok');
+      if (connected) ws.send(JSON.stringify({ type: 'apps-list' }));
+    }
     else if (m.type === 'error') setStatus(m.message, 'bad');
   };
   ws.onclose = () => { setActive(false); setStatus('Lost connection to the relay. Reconnecting…', 'bad'); setTimeout(openSocket, 3000); };
@@ -167,6 +219,86 @@ $('pushBtn').onclick = () => {
   setPush('Uploading ' + f.name + '…');
   xhr.send(f);
 };
+
+// ---- Manage apps ----
+const PRESETS = {
+  updates: ['com.amazon.device.software.ota', 'com.amazon.device.software.ota.override', 'com.amazon.device.software.ota.whitelist'],
+  ads: ['com.amazon.device.sale.service', 'com.amazon.kso.blackbird', 'com.amazon.ads.sff', 'com.amazon.device.metrics',
+        'com.amazon.device.logmanager', 'com.amazon.tv.fw.metrics', 'com.amazon.advertisingidsettings',
+        'com.amazon.bueller.notification', 'com.amazon.device.cloudkeeper', 'com.amazon.appmanager']
+};
+function applyPreset(list, name, confirmMsg) {
+  if (!connected) return setApps('Connect to a device first.', 'bad');
+  if (!confirm(confirmMsg)) return;
+  setApps('Applying “' + name + '” to the device…');
+  ws.send(JSON.stringify({ type: 'app-batch', action: 'disable', pkgs: list }));
+}
+$('pStopUpdates').onclick = () => applyPreset(PRESETS.updates, 'Stop Amazon updates',
+  'Disable Amazon’s system-update service on the connected device?\n\nStops Fire OS from auto-updating and re-bloating — but also stops security updates. Fully reversible with “Restore preset apps”.\n\nContinue?');
+$('pKillAds').onclick = () => applyPreset(PRESETS.ads, 'Kill ads & telemetry',
+  'Disable Amazon ad & telemetry packages on the connected device?\n\nReversible with “Restore preset apps”. Note: the home-screen sponsored row comes from the launcher and won’t fully disappear.\n\nContinue?');
+$('pRestoreAll').onclick = () => {
+  if (!connected) return setApps('Connect to a device first.', 'bad');
+  const all = Array.from(new Set(PRESETS.updates.concat(PRESETS.ads)));
+  setApps('Re-enabling preset apps…');
+  ws.send(JSON.stringify({ type: 'app-batch', action: 'enable', pkgs: all }));
+};
+$('loadApps').onclick = () => {
+  if (!connected) return setApps('Connect to a device first.', 'bad');
+  setApps('Loading apps from the device…');
+  ws.send(JSON.stringify({ type: 'apps-list' }));
+};
+$('appSearch').oninput = renderApps;
+document.querySelectorAll('input[name=af]').forEach((r) => r.onchange = renderApps);
+
+function currentFilter() { return (document.querySelector('input[name=af]:checked') || {}).value || 'user'; }
+
+function appAction(action, pkg, label, danger) {
+  if (danger && !confirm(
+    'Remove / change a SYSTEM app?\n\n' + label + '\n' + pkg +
+    '\n\nThis can break the device (boot loops, missing launcher). It is reversible with Restore, but only do this if you know this package is safe to remove.\n\nContinue?'
+  )) return;
+  setApps('Working on ' + pkg + '…');
+  ws.send(JSON.stringify({ type: 'app-action', action, pkg }));
+}
+
+function renderApps() {
+  const filter = currentFilter();
+  const q = ($('appSearch').value || '').toLowerCase().trim();
+  const list = $('appsList');
+  list.innerHTML = '';
+  const rows = appsData
+    .filter((a) => filter === 'all' || (filter === 'system' ? a.system : !a.system))
+    .filter((a) => !q || (a.label || '').toLowerCase().includes(q) || a.pkg.toLowerCase().includes(q))
+    .sort((a, b) => (a.label || a.pkg).localeCompare(b.label || b.pkg));
+  if (!rows.length) { list.innerHTML = '<div class="hint">No apps match.</div>'; return; }
+  rows.slice(0, 400).forEach((a) => {
+    const div = document.createElement('div');
+    div.className = 'app';
+    let badges = '';
+    if (a.system) badges += '<span class="badge sys">system</span>';
+    if (!a.enabled) badges += '<span class="badge off">disabled</span>';
+    if (!a.installed) badges += '<span class="badge gone">removed</span>';
+    if (a.protectedPkg) badges += '<span class="badge prot">protected</span>';
+    div.innerHTML = '<div class="nm">' + escapeHtml(a.label || a.pkg) + badges + '</div><div class="pk">' + escapeHtml(a.pkg) + '</div>';
+    const acts = document.createElement('div');
+    acts.className = 'acts';
+    if (!a.protectedPkg) {
+      if (!a.installed) {
+        acts.appendChild(mkBtn('Restore', 'primary', () => appAction('restore', a.pkg, a.label, false)));
+      } else if (!a.system) {
+        acts.appendChild(mkBtn('Uninstall', 'warn', () => appAction('uninstall', a.pkg, a.label, false)));
+      } else {
+        acts.appendChild(mkBtn('Remove (for user)', 'warn', () => appAction('remove-system', a.pkg, a.label, true)));
+        acts.appendChild(mkBtn(a.enabled ? 'Disable' : 'Enable', '', () => appAction(a.enabled ? 'disable' : 'enable', a.pkg, a.label, a.enabled)));
+      }
+    }
+    div.appendChild(acts);
+    list.appendChild(div);
+  });
+}
+function mkBtn(txt, cls, fn) { const b = document.createElement('button'); b.textContent = txt; if (cls) b.className = cls; b.onclick = fn; return b; }
+function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 const KEYMAP = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'OK', Backspace: 'BACK', h: 'HOME', H: 'HOME', ' ': 'PLAYPAUSE', m: 'MENU', M: 'MENU' };
 document.addEventListener('keydown', (e) => {

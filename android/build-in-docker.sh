@@ -16,7 +16,7 @@ if [ ! -f /work/release.jks ]; then
     -keystore /work/release.jks \
     -storepass tvhelp123 -keypass tvhelp123 \
     -alias tvhelp -keyalg RSA -keysize 2048 -validity 10000 \
-    -dname "CN=device Help, OU=Home, O=FireHelp, L=Home, S=Home, C=GB"
+    -dname "CN=Fire TV Help, OU=Home, O=FireHelp, L=Home, S=Home, C=GB"
 fi
 cat > /work/signing.properties <<EOF
 storeFile=release.jks

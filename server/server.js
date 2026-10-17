@@ -1,4 +1,4 @@
-// device remote relay - links the "device Help" app on a device with Wayne's web remote.
+// Fire TV remote relay - links the "Fire TV Help" app on a Fire TV with Wayne's web remote.
 // The TV app connects out to this server (works through any home router), shows a 6-digit code,
 // and only streams/accepts control after the person at the TV presses "Allow".
 'use strict';
@@ -81,7 +81,7 @@ const server = http.createServer((req, res) => {
 
   if (p === '/health') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok'); }
 
-  // public: the device app download (for the Downloader app)
+  // public: the Fire TV app download (for the Downloader app)
   if (p === '/tv' || p === '/tv/' || p === '/app.apk' || p === '/tv.apk') {
     return serveFile(res, APK, 'application/vnd.android.package-archive', { 'Content-Disposition': 'attachment; filename="HelpTool.apk"' });
   }
@@ -128,7 +128,7 @@ const server = http.createServer((req, res) => {
     const code = (url.searchParams.get('code') || '').replace(/\D/g, '');
     const name = String(req.headers['x-filename'] || 'update.apk').replace(/[^\w.\- ]/g, '_').slice(0, 60);
     const d = devices.get(code);
-    if (!d) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('That device is not connected.'); }
+    if (!d) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('That TV is not connected.'); }
     if (!d.viewer) { res.writeHead(409, { 'Content-Type': 'text/plain' }); return res.end('Start a session first (they must tap Allow) before sending an app.'); }
     const chunks = []; let size = 0; let tooBig = false;
     req.on('data', (c) => { size += c.length; if (size > 80 * 1024 * 1024) { tooBig = true; req.destroy(); return; } chunks.push(c); });
@@ -173,7 +173,7 @@ function endSession(d, reason) {
 
 function onDevice(ws, req) {
   const code = newCode();
-  const d = { ws, name: 'device', model: '', version: '', viewer: null, since: Date.now() };
+  const d = { ws, name: 'Fire TV', model: '', version: '', viewer: null, since: Date.now() };
   devices.set(code, d);
   ws.isAlive = true; ws.on('pong', () => { ws.isAlive = true; });
   send(ws, { type: 'code', code });
@@ -186,9 +186,9 @@ function onDevice(ws, req) {
     }
     let m; try { m = JSON.parse(data.toString()); } catch { return; }
     if (m.type === 'hello') {
-      d.name = String(m.name || 'device').slice(0, 60); d.model = String(m.model || '').slice(0, 60); d.version = String(m.version || '').slice(0, 20);
+      d.name = String(m.name || 'Fire TV').slice(0, 60); d.model = String(m.model || '').slice(0, 60); d.version = String(m.version || '').slice(0, 20);
       log('device', code, 'is', d.name, d.model, d.version);
-    } else if (d.viewer && ['accepted', 'denied', 'info', 'status', 'adb', 'install-result'].includes(m.type)) {
+    } else if (d.viewer && ['accepted', 'denied', 'info', 'status', 'adb', 'install-result', 'apps', 'app-action-result', 'app-batch-result'].includes(m.type)) {
       send(d.viewer, m);
       if (m.type === 'denied') endSession(d, 'The person at the TV said no.');
     } else if (m.type === 'stop') {
@@ -218,7 +218,7 @@ function onViewer(ws, req) {
       log('session requested for', code, d.name);
     } else if (m.type === 'end') {
       if (ws.device) endSession(ws.device, 'The session was ended.');
-    } else if (ws.device && ['key', 'text', 'quality'].includes(m.type)) {
+    } else if (ws.device && ['key', 'text', 'quality', 'apps-list', 'app-action', 'app-batch'].includes(m.type)) {
       send(ws.device.ws, m);
     }
   });

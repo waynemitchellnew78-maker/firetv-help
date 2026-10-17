@@ -2,7 +2,7 @@
   "name": "fireremote-relay",
   "version": "1.0.0",
   "private": true,
-  "description": "Relay between the device Help device app and Wayne's web remote",
+  "description": "Relay between the Fire TV Help device app and Wayne's web remote",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
   "dependencies": { "ws": "^8.18.0" }

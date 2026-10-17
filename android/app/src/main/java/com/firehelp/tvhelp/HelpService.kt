@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -30,6 +32,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import okio.ByteString.Companion.toByteString
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
@@ -120,8 +123,122 @@ class HelpService : Service() {
             "text" -> if (AppState.phase == AppState.Phase.IN_SESSION) adb.text(m.optString("text"))
             "quality" -> applyQuality(m.optString("quality"))
             "install" -> doInstall(m.optString("url"), m.optString("name", "update.apk"))
+            "apps-list" -> sendAppList()
+            "app-action" -> doAppAction(m.optString("action"), m.optString("pkg"))
+            "app-batch" -> doAppBatch(m.optString("action"), m.optJSONArray("pkgs"))
             "ended" -> endSession(m.optString("reason", "Session ended."))
         }
+    }
+
+    // ---------- app management (list + uninstall/disable/restore over ADB) ----------
+
+    /** Packages the app will never act on, however the controller asks. */
+    private fun isProtected(pkg: String): Boolean {
+        if (pkg.isBlank() || pkg == packageName) return true
+        val p = pkg.lowercase()
+        if (p == "android" || p.startsWith("android.")) return true
+        val critical = setOf(
+            "com.android.systemui", "com.android.shell", "com.android.settings",
+            "com.android.phone", "com.android.providers.settings", "com.android.providers.media",
+            "com.android.keychain", "com.android.certinstaller", "com.android.inputdevices",
+            "com.amazon.device.sync", "com.amazon.tv.settings"
+        )
+        if (pkg in critical) return true
+        if (p.contains("launcher") || p.contains("systemui") || p.contains("inputmethod")) return true
+        return false
+    }
+
+    private fun sendAppList() = Thread {
+        try {
+            val pm = packageManager
+            val flags = PackageManager.MATCH_UNINSTALLED_PACKAGES
+            val pkgs = pm.getInstalledPackages(flags)
+            val arr = JSONArray()
+            for (pi in pkgs) {
+                val ai = pi.applicationInfo ?: continue
+                val isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                    (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                val installed = (ai.flags and ApplicationInfo.FLAG_INSTALLED) != 0
+                val label = try { pm.getApplicationLabel(ai).toString() } catch (_: Exception) { pi.packageName }
+                arr.put(
+                    JSONObject()
+                        .put("pkg", pi.packageName)
+                        .put("label", label)
+                        .put("system", isSystem)
+                        .put("enabled", ai.enabled)
+                        .put("installed", installed)
+                        .put("protectedPkg", isProtected(pi.packageName))
+                )
+            }
+            send(JSONObject().put("type", "apps").put("list", arr))
+        } catch (e: Exception) {
+            send(JSONObject().put("type", "apps").put("error", e.message ?: "Couldn't read the app list"))
+        }
+    }.start()
+
+    private fun doAppAction(action: String, pkg: String) {
+        if (pkg.isBlank()) return
+        if (isProtected(pkg)) {
+            toastMsg("Refused: $pkg is protected")
+            send(appResult(pkg, action, false, "That package is protected and can't be changed."))
+            return
+        }
+        val cmd = when (action) {
+            "uninstall"     -> "pm uninstall $pkg"
+            "remove-system" -> "pm uninstall -k --user 0 $pkg"
+            "disable"       -> "pm disable-user --user 0 $pkg"
+            "enable"        -> "pm enable $pkg"
+            "restore"       -> "cmd package install-existing $pkg"
+            else -> return
+        }
+        val okMark = when (action) {
+            "disable" -> "disabled"; "enable" -> "enabled"
+            "restore" -> "installed for user"; else -> "Success"
+        }
+        toastMsg("$action: $pkg")
+        adb.shellOut(cmd) { out ->
+            val ok = out.contains(okMark, ignoreCase = true)
+            send(appResult(pkg, action, ok, if (out.isBlank()) "(no output)" else out.take(180)))
+        }
+    }
+
+    /** Apply one action to a list of packages in sequence (presets). Reports a summary. */
+    private fun doAppBatch(action: String, pkgs: JSONArray?) {
+        if (pkgs == null || pkgs.length() == 0) return
+        val template = when (action) {
+            "disable"       -> "pm disable-user --user 0 %s"
+            "enable"        -> "pm enable %s"
+            "remove-system" -> "pm uninstall -k --user 0 %s"
+            "restore"       -> "cmd package install-existing %s"
+            else -> return
+        }
+        val okMark = when (action) {
+            "disable" -> "disabled"; "enable" -> "enabled"
+            "restore" -> "installed for user"; else -> "Success"
+        }
+        toastMsg("Applying preset ($action) to ${pkgs.length()} apps…")
+        Thread {
+            val results = JSONArray()
+            var done = 0
+            for (i in 0 until pkgs.length()) {
+                val pkg = pkgs.optString(i)
+                if (pkg.isBlank()) continue
+                if (isProtected(pkg)) { results.put(JSONObject().put("pkg", pkg).put("ok", false).put("message", "protected")); continue }
+                val out = adb.shellOutSync(template.format(pkg))
+                val ok = out.contains(okMark, ignoreCase = true)
+                if (ok) done++
+                results.put(JSONObject().put("pkg", pkg).put("ok", ok).put("message", if (out.isBlank()) "(not present)" else out.take(120)))
+            }
+            toastMsg("Preset done: $done changed")
+            send(JSONObject().put("type", "app-batch-result").put("action", action).put("done", done).put("results", results))
+        }.start()
+    }
+
+    private fun appResult(pkg: String, action: String, ok: Boolean, msg: String) =
+        JSONObject().put("type", "app-action-result").put("pkg", pkg).put("action", action).put("ok", ok).put("message", msg)
+
+    private fun toastMsg(t: String) = main.post {
+        android.widget.Toast.makeText(this, t, android.widget.Toast.LENGTH_LONG).show()
     }
 
     /** Download a pushed APK and (re)install it over ADB. Visible to the household via a toast. */

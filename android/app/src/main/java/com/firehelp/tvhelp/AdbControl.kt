@@ -63,6 +63,29 @@ class AdbControl(context: Context) {
         if (clean.isNotEmpty()) shell("input text '$clean'")
     }
 
+    /** Run a shell command and return its combined output (reconnects once). On the ADB thread. */
+    fun shellOut(cmd: String, onResult: (String) -> Unit) = exec.execute {
+        try {
+            val d = dadb ?: run { connect(); dadb }
+            if (d == null) { onResult("ERROR: not connected to ADB"); return@execute }
+            onResult(d.shell(cmd).output.trim())
+        } catch (e: Exception) {
+            dadb = null
+            try { connect(); onResult(dadb?.shell(cmd)?.output?.trim() ?: "ERROR") }
+            catch (e2: Exception) { onResult("ERROR: " + (e2.message ?: e2.toString())) }
+        }
+    }
+
+    /** Blocking variant for running several commands in sequence (used by presets). */
+    fun shellOutSync(cmd: String): String {
+        return try {
+            exec.submit<String> {
+                val d = dadb ?: run { connect(); dadb }
+                if (d == null) "ERROR: not connected to ADB" else d.shell(cmd).output.trim()
+            }.get()
+        } catch (e: Exception) { "ERROR: " + (e.message ?: e.toString()) }
+    }
+
     /** Push an APK to the TV and (re)install it. Runs on the ADB thread; result is plain English. */
     fun install(apk: File, onResult: (Boolean, String) -> Unit) = exec.execute {
         val remote = "/data/local/tmp/tvhelp_update.apk"
