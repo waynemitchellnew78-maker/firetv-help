@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device Remote</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a2129; --card2:#222b35; --text:#e8edf2; --muted:#93a1b0; --accent:#ff9900; --ok:#4cd27a; --bad:#ff6b6b; --line:#33404d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.4 system-ui, sans-serif; }
+  header { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0; flex:1; }
+  header a { color:var(--muted); font-size:14px; }
+  main { display:grid; grid-template-columns: 1fr 300px; gap:16px; padding:16px; max-width:1400px; margin:0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border-radius:12px; padding:14px; }
+  .card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 10px; }
+  #screenWrap { position:relative; background:#000; border-radius:10px; aspect-ratio:16/9; display:grid; place-items:center; overflow:hidden; }
+  #screen { width:100%; height:100%; object-fit:contain; display:none; }
+  #placeholder { color:var(--muted); text-align:center; padding:20px; }
+  #status { margin-top:10px; font-size:14px; color:var(--muted); min-height:20px; }
+  #status.ok { color:var(--ok); } #status.bad { color:var(--bad); }
+  .row { display:flex; gap:8px; }
+  input[type=text] { flex:1; min-width:0; padding:10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--text); font-size:16px; }
+  button { padding:10px 12px; border:0; border-radius:8px; background:var(--card2); color:var(--text); font-size:15px; cursor:pointer; }
+  button:hover { background:#2c3744; } button:active { transform:scale(.97); }
+  button.primary { background:var(--accent); color:#111; font-weight:600; }
+  button.danger { background:#5a2a2a; }
+  .devices { list-style:none; margin:10px 0 0; padding:0; }
+  .devices li { display:flex; align-items:center; gap:8px; padding:8px 0; border-top:1px solid var(--line); }
+  .devices li span { flex:1; } .devices small { color:var(--muted); display:block; }
+  .pad { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin:6px 0 12px; }
+  .pad button { padding:16px 0; font-size:18px; }
+  .pad .ok { background:var(--accent); color:#111; font-weight:700; border-radius:50%; aspect-ratio:1; padding:0; }
+  .grid4 { display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:12px; }
+  .grid4 button { padding:12px 0; font-size:14px; }
+  .hint { color:var(--muted); font-size:13px; margin-top:8px; }
+  #controls[aria-disabled=true], #updateCard[aria-disabled=true] { opacity:.45; pointer-events:none; }
+  #fps { position:absolute; right:8px; bottom:6px; font-size:12px; color:#ffffff99; display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📺 Device Remote</h1>
+  <a href="/logout">Sign out</a>
+</header>
+<main>
+  <section class="card">
+    <div id="screenWrap">
+      <img id="screen" alt="device screen">
+      <div id="placeholder">Not connected.<br>Ask them to open <b>Help Tool</b> on their device and read you the code.</div>
+      <div id="fps"></div>
+    </div>
+    <div id="status"></div>
+  </section>
+
+  <aside>
+    <div class="card" style="margin-bottom:16px">
+      <h2>Connect</h2>
+      <div class="row">
+        <input type="text" id="code" inputmode="numeric" maxlength="7" placeholder="6-digit code from their device">
+        <button class="primary" id="connectBtn">Connect</button>
+      </div>
+      <ul class="devices" id="devices"></ul>
+      <div class="hint" id="noDevices">No devices have the app open right now.</div>
+    </div>
+
+    <div class="card" id="controls" aria-disabled="true">
+      <h2>Remote</h2>
+      <div class="pad">
+        <span></span><button data-key="UP">▲</button><span></span>
+        <button data-key="LEFT">◀</button><button class="ok" data-key="OK">OK</button><button data-key="RIGHT">▶</button>
+        <span></span><button data-key="DOWN">▼</button><span></span>
+      </div>
+      <div class="grid4">
+        <button data-key="BACK">↩ Back</button><button data-key="HOME">⌂ Home</button><button data-key="MENU">☰ Menu</button><button data-key="SETTINGS">⚙</button>
+        <button data-key="REWIND">⏪</button><button data-key="PLAYPAUSE">⏯</button><button data-key="FORWARD">⏩</button><button data-key="SEARCH">🔍</button>
+        <button data-key="VOLDOWN">🔉</button><button data-key="MUTE">🔇</button><button data-key="VOLUP">🔊</button><button data-key="SLEEP">⏻ Sleep</button>
+      </div>
+      <div class="row">
+        <input type="text" id="text" placeholder="Type into a search box…">
+        <button id="sendText">Send</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="danger" id="endBtn" style="flex:1">End session</button>
+      </div>
+      <div class="hint">Keyboard: arrows, Enter = OK, Backspace = Back, H = Home, Space = Play/Pause.</div>
+    </div>
+
+    <div class="card" id="updateCard" aria-disabled="true" style="margin-top:16px">
+      <h2>Update / install app</h2>
+      <input type="file" id="apkFile" accept=".apk,application/vnd.android.package-archive" style="width:100%; color:var(--muted); font-size:13px">
+      <div class="row" style="margin-top:8px">
+        <button class="primary" id="pushBtn" style="flex:1">Send to TV &amp; install</button>
+      </div>
+      <div class="hint" id="pushStatus">Pick an .apk to push to the connected TV. They’ll see it installing, then it updates in place.</div>
+    </div>
+  </aside>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let ws, connected = false, lastUrl = null, frames = 0, currentCode = null;
+
+function setStatus(msg, cls) { $('status').textContent = msg || ''; $('status').className = cls || ''; }
+function setPush(msg, cls) { const el = $('pushStatus'); el.textContent = msg; el.style.color = cls === 'bad' ? 'var(--bad)' : cls === 'ok' ? 'var(--ok)' : ''; }
+function setActive(on) {
+  connected = on;
+  $('updateCard').setAttribute('aria-disabled', on ? 'false' : 'true');
+  $('controls').setAttribute('aria-disabled', on ? 'false' : 'true');
+  if (!on) { $('screen').style.display = 'none'; $('placeholder').style.display = 'block'; $('fps').style.display = 'none'; }
+}
+
+function openSocket() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/viewer');
+  ws.binaryType = 'blob';
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== 'string') { // a JPEG frame
+      const url = URL.createObjectURL(ev.data);
+      $('screen').onload = () => { if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url; };
+      $('screen').src = url; $('screen').style.display = 'block'; $('placeholder').style.display = 'none';
+      frames++; return;
+    }
+    const m = JSON.parse(ev.data);
+    if (m.type === 'waiting') setStatus(`Asking ${m.name} for permission… they need to press Allow, then “Start now”.`);
+    else if (m.type === 'accepted') { setActive(true); setStatus('Connected. You are in control.', 'ok'); }
+    else if (m.type === 'status') setStatus(m.message, m.ok === false ? 'bad' : 'ok');
+    else if (m.type === 'adb') setStatus(m.ok ? 'Remote control ready.' : 'Screen is showing, but buttons need setup on the TV: ' + m.message, m.ok ? 'ok' : 'bad');
+    else if (m.type === 'denied') { setActive(false); setStatus('They said no.', 'bad'); }
+    else if (m.type === 'ended') { setActive(false); setStatus(m.reason || 'Session ended.', 'bad'); }
+    else if (m.type === 'install-result') setPush(m.ok ? 'Installed on the TV ✓' : 'Install failed: ' + (m.message || ''), m.ok ? 'ok' : 'bad');
+    else if (m.type === 'error') setStatus(m.message, 'bad');
+  };
+  ws.onclose = () => { setActive(false); setStatus('Lost connection to the relay. Reconnecting…', 'bad'); setTimeout(openSocket, 3000); };
+}
+openSocket();
+
+function join(code) {
+  code = String(code).replace(/\D/g, '');
+  if (code.length !== 6) return setStatus('Codes are 6 digits.', 'bad');
+  currentCode = code;
+  ws.send(JSON.stringify({ type: 'join', code }));
+}
+$('connectBtn').onclick = () => join($('code').value);
+$('code').onkeydown = (e) => { if (e.key === 'Enter') join($('code').value); };
+$('endBtn').onclick = () => { ws.send(JSON.stringify({ type: 'end' })); setActive(false); setStatus('Session ended.'); };
+
+function key(k) { if (connected) ws.send(JSON.stringify({ type: 'key', key: k })); }
+document.querySelectorAll('[data-key]').forEach((b) => b.onclick = () => key(b.dataset.key));
+function sendText() { const t = $('text').value; if (t && connected) { ws.send(JSON.stringify({ type: 'text', text: t })); $('text').value = ''; } }
+$('sendText').onclick = sendText;
+$('text').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); sendText(); } };
+
+$('pushBtn').onclick = () => {
+  const f = $('apkFile').files[0];
+  if (!f) return setPush('Pick an .apk file first.', 'bad');
+  if (!currentCode || !connected) return setPush('Connect to a TV (they tap Allow) first.', 'bad');
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/push?code=' + currentCode);
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.setRequestHeader('x-filename', f.name);
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) setPush('Uploading ' + f.name + '… ' + Math.round(e.loaded / e.total * 100) + '%'); };
+  xhr.onload = () => { if (xhr.status === 200) setPush('Sent — installing on the TV…'); else setPush('Upload failed: ' + (xhr.responseText || xhr.status), 'bad'); };
+  xhr.onerror = () => setPush('Upload error.', 'bad');
+  xhr.onloadend = () => { $('pushBtn').disabled = false; };
+  $('pushBtn').disabled = true;
+  setPush('Uploading ' + f.name + '…');
+  xhr.send(f);
+};
+
+const KEYMAP = { ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT', Enter: 'OK', Backspace: 'BACK', h: 'HOME', H: 'HOME', ' ': 'PLAYPAUSE', m: 'MENU', M: 'MENU' };
+document.addEventListener('keydown', (e) => {
+  if (!connected || e.target.tagName === 'INPUT') return;
+  const k = KEYMAP[e.key]; if (k) { e.preventDefault(); key(k); }
+});
+
+// list of TVs that have the app open
+async function refreshDevices() {
+  try {
+    const list = await (await fetch('/api/devices', { cache: 'no-store' })).json();
+    const ul = $('devices'); ul.innerHTML = '';
+    $('noDevices').style.display = list.length ? 'none' : 'block';
+    list.forEach((d) => {
+      const li = document.createElement('li');
+      const s = document.createElement('span'); s.textContent = d.name;
+      const sm = document.createElement('small'); sm.textContent = `${d.model || ''} · code ${d.code}${d.busy ? ' · in session' : ''}`; s.appendChild(sm);
+      const b = document.createElement('button'); b.textContent = 'Connect'; b.disabled = d.busy; b.onclick = () => join(d.code);
+      li.append(s, b); ul.appendChild(li);
+    });
+  } catch (e) { if (String(e).includes('JSON')) location.href = '/login'; }
+}
+refreshDevices(); setInterval(refreshDevices, 4000);
+setInterval(() => { if (connected) { $('fps').style.display = 'block'; $('fps').textContent = frames + ' fps'; } frames = 0; }, 1000);
+</script>
+</body>
+</html>

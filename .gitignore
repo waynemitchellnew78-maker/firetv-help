@@ -1,0 +1,13 @@
+# secrets — never commit
+server/.env
+android/release.jks
+android/signing.properties
+
+# build output / caches
+android/build/
+android/app/build/
+android/.gradle/
+android/.kotlin/
+server/node_modules/
+server/data/*.apk
+**/*.log

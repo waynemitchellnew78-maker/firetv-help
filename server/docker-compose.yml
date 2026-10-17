@@ -1,0 +1,34 @@
+name: fireremote
+
+# Published via Traefik on 443 with a Let's Encrypt cert (same as photos.firehelp.co.uk).
+services:
+  fireremote:
+    build: .
+    image: fireremote:latest
+    container_name: fireremote
+    restart: unless-stopped
+    ports:
+      - "8790:8790"   # direct LAN access at home (http://192.168.1.25:8790) — loopback bypass
+    environment:
+      - PORT=8790
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - APK_PATH=/data/FireTVHelp.apk
+      - PUBLIC_URL=https://xxxxx
+    volumes:
+      - ./data:/data:ro
+    networks:
+      - default
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=aiostreams_default"
+      - "traefik.http.routers.fireremote.rule=Host(`xxxxx`)"
+      - "traefik.http.routers.fireremote.entrypoints=websecure"
+      - "traefik.http.routers.fireremote.tls.certresolver=letsencrypt"
+      - "traefik.http.services.fireremote.loadbalancer.server.port=8790"
+
+networks:
+  traefik:
+    name: aiostreams_default
+    external: true

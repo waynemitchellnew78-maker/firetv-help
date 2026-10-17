@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Device Remote – sign in</title>
+<style>
+  :root { --bg:#0f1419; --card:#1a2129; --text:#e8edf2; --muted:#93a1b0; --accent:#ff9900; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--text); font:16px/1.4 system-ui, sans-serif; padding:16px; }
+  form { background:var(--card); padding:28px; border-radius:14px; width:100%; max-width:340px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p { color:var(--muted); margin:0 0 18px; font-size:14px; }
+  input { width:100%; padding:12px; border-radius:8px; border:1px solid #33404d; background:#0f1419; color:var(--text); font-size:16px; }
+  button { margin-top:14px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--accent); color:#111; font-weight:600; font-size:16px; cursor:pointer; }
+  .bad { color:var(--bad); font-size:14px; margin-top:10px; display:none; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h1>Device Remote</h1>
+  <p>Help family with their device.</p>
+  <input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" required>
+  <button type="submit">Sign in</button>
+  <div class="bad" id="bad">Wrong password.</div>
+</form>
+<script>if (location.search.includes('bad=1')) document.getElementById('bad').style.display = 'block';</script>
+</body>
+</html>
