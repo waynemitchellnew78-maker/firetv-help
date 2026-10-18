@@ -70,10 +70,29 @@ class HelpService : Service() {
         Holder.instance = this
         adb = AdbControl(this)
         startForeground(NOTE_ID, notification("Help Tool is open"))
-        adb.connectAsync { problem ->
-            AppState.update { adbReady = problem == null; adbMessage = problem ?: "" }
-        }
+        ensureAdb()
         connect()
+    }
+
+    /**
+     * Keep trying to connect to ADB on its own. The first attempt triggers the Fire TV's
+     * "Allow USB debugging?" prompt; the moment the person accepts it, one of these retries
+     * succeeds and control comes alive — no app restart needed. Pushes the status to the
+     * controller each time it changes, so the "buttons need setup" line clears itself.
+     */
+    private var adbWasReady = false
+    private fun ensureAdb() {
+        if (stopped) return
+        adb.connectAsync { problem ->
+            val ready = problem == null
+            AppState.update { adbReady = ready; adbMessage = problem ?: "" }
+            if (ready != adbWasReady) {
+                adbWasReady = ready
+                send(JSONObject().put("type", "adb").put("ok", ready).put("message", problem ?: ""))
+                if (ready) main.post { android.widget.Toast.makeText(this, "Remote control ready", android.widget.Toast.LENGTH_SHORT).show() }
+            }
+            if (!ready && !stopped) main.postDelayed({ ensureAdb() }, 4000)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
